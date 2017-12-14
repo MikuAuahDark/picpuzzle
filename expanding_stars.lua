@@ -30,7 +30,7 @@ function stars.load()
 	#define RADIUS_SEED 1337.0
 	#define START_POS_SEED 2468.0
 	#define THETA_SEED 1675.0
-	#define iResolution love_ScreenSize
+	const vec2 iResolution = vec2(864.0, 486.0);
 	extern float iTime;
 	extern vec3 backgroundColor;
 	extern sampler2D noiseImage;
@@ -126,7 +126,6 @@ end
 
 function stars.draw()
 	love.graphics.push("all")
-	love.graphics.origin()
 	love.graphics.setShader(shader)
 	love.graphics.draw(temp_image)
 	love.graphics.pop()

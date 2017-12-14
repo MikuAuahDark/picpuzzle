@@ -24,9 +24,11 @@ function Main.Start(arg)
 	stars.setColorTransition(1, 1, 1)
 	
 	for i, v in ipairs(love.filesystem.getDirectoryItems("")) do
-		local info = love.filesystem.getInfo(v)
-		if love.filesystem.getRealDirectory(v) == savedir and info.type == "file" then
-			Main.FileList[#Main.FileList + 1] = v
+		if v ~= "JUST_IN_TIME.txt" then
+			local info = love.filesystem.getInfo(v)
+			if love.filesystem.getRealDirectory(v) == savedir and info.type == "file" then
+				Main.FileList[#Main.FileList + 1] = v
+			end
 		end
 	end
 	
