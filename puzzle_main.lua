@@ -3,6 +3,7 @@ local AquaShine = ...
 local love = love
 local flux = require("flux")
 local stars = require("expanding_stars")
+local lily = require("lily")
 
 -- 1	2	3	6	9	18	27	54	81	162	243	486
 local PuzzleMain = {Segments = 18}
@@ -43,22 +44,32 @@ end
 function PuzzleMain.CustomFluxInterpolation(p)
 	return math.log10(p*90 + 10) - 1
 end
-	
+
 function PuzzleMain.Start(arg)
-	local len = PuzzleMain.Size * PuzzleMain.Size
-	
-	-- Load image supplied by arg
 	local fd
 	if arg.lovepath then
-		PuzzleMain.ImageData = love.image.newImageData(arg.lovepath)
+		lily.newImageData(arg.lovepath)
+			:onComplete(PuzzleMain.MainStart)
+			:setUserData(arg)
 	else
 		local image = assert(io.open(arg[1], "rb"))
 		local fd = love.filesystem.newFileData(image:read("*a"), "_")
-		PuzzleMain.ImageData = love.image.newImageData(fd)
+		lily.newImageData(fd)
+			:onComplete(PuzzleMain.MainStart)
+			:setUserData(arg)
 		image:close()
 	end
-	PuzzleMain.Image = love.graphics.newImage(PuzzleMain.ImageData)
-	PuzzleMain.ImageWH = {PuzzleMain.Image:getDimensions()}
+	
+	PuzzleMain.Font = AquaShine.LoadFont(nil, 18)	-- Vera sans
+end
+	
+function PuzzleMain.MainStart(arg, image)
+	local len = PuzzleMain.Size * PuzzleMain.Size
+	
+	-- Load image supplied by arg
+	PuzzleMain.ImageData = image
+	PuzzleMain.Image = love.graphics.newImage(image)
+	PuzzleMain.ImageWH = {image:getDimensions()}
 	
 	-- Get puzzle size
 	PuzzleMain.Segments = assert(tonumber(arg[2] or 81), "Invalid number specificed")
@@ -68,7 +79,6 @@ function PuzzleMain.Start(arg)
 	
 	-- Initialize canvas and font
 	PuzzleMain.Canvas = love.graphics.newCanvas(486, 486)
-	PuzzleMain.Font = AquaShine.LoadFont(nil, 18)	-- Vera sans
 	
 	-- Draw it to canvas
 	PuzzleMain.Canvas:renderTo(PuzzleMain.Redraw)
@@ -224,6 +234,13 @@ function PuzzleMain.Draw()
 	-- Draw stars
 	stars.draw()
 	
+	-- If image is not loaded yet, display message
+	if not(PuzzleMain.ImageData) then
+		love.graphics.setFont(PuzzleMain.Font)
+		love.graphics.print("Loading Image...", 364, 233)
+		return
+	end
+	
 	-- Push stack and initialize
 	love.graphics.push("all")
 	love.graphics.setLineWidth(1)
@@ -284,10 +301,12 @@ function PuzzleMain.Draw()
 end
 
 function PuzzleMain.Resize()
+	if not(PuzzleMain.ImageData) then return end
 	PuzzleMain.Canvas:renderTo(PuzzleMain.Redraw)
 end
 
 function PuzzleMain.MousePressed(x, y, b)
+	if not(PuzzleMain.ImageData) then return end
 	if PuzzleMain.TweenInProgress then return end
 	
 	if not(PuzzleMain.IsPuzzleComplete) then
@@ -321,11 +340,13 @@ function PuzzleMain.MousePressed(x, y, b)
 end
 
 function PuzzleMain.MouseMoved(x, y, dx, dy)
+	if not(PuzzleMain.ImageData) then return end
 	if PuzzleMain.TweenInProgress then return end
 	return PuzzleMain.MainNode:triggerEvent("MouseMoved", x, y, dx, dy, false)
 end
 
 function PuzzleMain.MouseReleased(x, y, b)
+	if not(PuzzleMain.ImageData) then return end
 	if PuzzleMain.TweenInProgress then return end
 	return PuzzleMain.MainNode:triggerEvent("MouseReleased", x, y, b, false)
 end

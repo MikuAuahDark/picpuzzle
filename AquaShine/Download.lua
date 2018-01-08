@@ -3,7 +3,7 @@
 -- See copyright notice in AquaShine.lua
 
 local AquaShine = ...
-local class = require("30log")
+local class = AquaShine.Class
 local love = require("love")
 local Download = class("AquaShine.Download")
 local DownloadList = setmetatable({}, {__mode = "k"})
@@ -22,15 +22,17 @@ local chunk_handler = {
 		this.HeaderData = headers
 	end,
 	DONE = function(this, data)
-		this:ok()
 		this.downloading = false
+		DownloadList[this.channelin] = nil
+		this:ok()
 		this.StatusCode = nil
 		this.ContentLength = nil
 		this.HeaderData = nil
 	end,
 	["ERR "] = function(this, data)
-		this:err(data)
 		this.downloading = false
+		DownloadList[this.channelin] = nil
+		this:err(data)
 		this.StatusCode = nil
 		this.ContentLength = nil
 		this.HeaderData = nil
@@ -57,6 +59,7 @@ function Download.init(this)
 		local t = this.thread
 		local cin = this.channelin
 		
+		print("push quit")
 		cin:push("QUIT")
 	end
 	
@@ -77,6 +80,7 @@ function Download.Download(this, url, additional_headers)
 	this.channelin:push(assert(url))
 	this.channelin:push(additional_headers or {})
 	this.downloading = true
+	DownloadList[this.channelin] = this
 end
 
 function love.handlers.aqs_download(input, name, data)

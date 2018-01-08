@@ -3,8 +3,9 @@
 -- See copyright notice in AquaShine.lua
 
 local cin = ...
+local socket = require("socket")
 local http = require("socket.http")
-local url = require("socket.url")
+http.TIMEOUT = 120
 
 -- AquaShine download event
 local le = require("love.event")
@@ -13,62 +14,8 @@ local function push_event(name, data)
 	le.push("aqs_download", cin, name, data)
 end
 
--- From Luasocket 2.0.2 with some modifications
--- where proxy and authentication is removed
-local default = {
-	host = "",
-	port = PORT,
-	path ="/",
-	scheme = "http"
-}
-
-local function adjusturi(reqt)
-	return url.build {
-	   path = assert(reqt.path, "invalid path 'nil'"),
-	   params = reqt.params,
-	   query = reqt.query,
-	   fragment = reqt.fragment
-	}
-end
-
-local function adjustheaders(reqt)
-	-- default headers
-	local lower = {
-		["host"] = reqt.host,
-		["connection"] = "close, TE",
-		["te"] = "trailers"
-	}
-	-- override with user headers
-	for i,v in pairs(reqt.headers or lower) do
-		lower[string.lower(i)] = v
-	end
-	return lower
-end
-
--- default url parts
-local default = {
-	host = "",
-	port = PORT,
-	path ="/",
-	scheme = "http"
-}
-
 local function check_if_quit()
 	assert(cin:pop() ~= "QUIT", "Quit requested")
-end
-
-local function adjustrequest(reqt)
-	-- parse url if provided
-	local nreqt = reqt.url and url.parse(reqt.url, default) or {}
-	-- explicit components override url
-	for i,v in pairs(reqt) do nreqt[i] = v end
-	if nreqt.port == "" then nreqt.port = 80 end
-	assert(nreqt.host and nreqt.host ~= "", "invalid host")
-	-- compute uri if user hasn't overriden
-	nreqt.uri = reqt.uri or adjusturi(nreqt)
-	-- adjust headers in request
-	nreqt.headers = adjustheaders(nreqt)
-	return nreqt
 end
 
 -- We create our custom sink function which does send
@@ -83,31 +30,98 @@ local function custom_sink(chunk, err)
 end
 
 -- HTTP request function
+local lasturl
+local lasthttp
+
+local function get_http(url, force)
+	local h
+	local dest, uri = assert(url:match("http://([^/]+)(/?.*)"))
+	local host, port = dest:match("([^:]+):?(%d*)")
+	port = #port > 0 and port or "80"
+	local fulldest = host..":"..port
+	if not(force) and lasthttp and lasturl == fulldest and lasthttp.c:getsockname() then
+		-- Keep-alive
+		h = lasthttp
+	else
+		-- New connection
+		if lasthttp then
+			lasthttp:close()
+		end
+		
+		print("pre-http open")
+		h = http.open(host, assert(tonumber(port)))
+		print("post-http open")
+	end
+	lasthttp = nil
+	lasturl = fulldest
+	
+	return h, #uri == 0 and "/" or uri, dest
+end
+
+local function send_http(h, str)
+	print(str)
+	return h.c:send(str)
+end
+
 local request_http = socket.protect(function(url, headers)
 	-- Build request table
-	local req = {}
-	req.url = url
-	req.sink = custom_sink
+	local h, uri, dest = get_http(url)
+	print("http hand", h, uri)
 	
 	-- Adjust
-	local nreqt = adjustrequest(req)
-	local h = http.open(nreqt.host, nreqt.port, nreqt.create)
-	h:sendrequestline(nreqt.method, nreqt.uri)
+	local basic_header = {
+		["host"] = dest,
+		["connection"] = "keep-alive",
+		["keep-alive"] = "timeout=60",
+		["user-agent"] = "AquaShine.Download "..socket._VERSION
+	}
+	print("header base", basic_header, headers)
 	
 	-- Override headers
 	for n, v in pairs(headers) do
-		nreqt.headers[n:lower()] = tostring(v)
+		print("add header", n, v)
+		if v == math.huge then
+			basic_header[n:lower()] = nil
+		else
+			basic_header[n:lower()] = tostring(v)
+		end
 	end
-	h:sendheaders(nreqt.headers)
+	print("header modified", basic_header)
+	
+	-- Send
+	do
+		local reqline = string.format("GET %s HTTP/1.1\r\n", uri)
+		
+		print("pre-send req")
+		if not(send_http(h, reqline)) then
+			-- Looks like closed. Re-create
+			h = get_http(url, true)
+			send_http(h, reqline)
+			print("2nd send req")
+		else
+			print("1st send req")
+		end
+	end
+	print("pre-send header")
+	do
+		local headerstr = {}
+		for n, v in pairs(basic_header) do
+			headerstr[#headerstr + 1] = string.format("%s: %s\r\n", n, v)
+		end
+		headerstr[#headerstr + 1] = "\r\n"
+		send_http(h, table.concat(headerstr))
+	end
+	print("post-send header")
 	
 	local code, status = h:receivestatusline()
+	print("post-reveice req")
 	-- if it is an HTTP/0.9 server, simply get the body and we are done
 	if not code then
 		push_event("RESP", 200)
 		push_event("SIZE", -1)
-		h:receive09body(status, nreqt.sink, nreqt.step)
+		h:receive09body(status, custom_sink)
 		push_event("DONE", 0)
-		
+		h:close()
 		return
 	end
 	
@@ -120,17 +134,25 @@ local request_http = socket.protect(function(url, headers)
 	headers = h:receiveheaders()
 	
 	push_event("RESP", code)
+	print("resp", code)
 	push_event("SIZE", headers['content-length'] and tonumber(headers['content-length']) or -1)
 	push_event("HEDR", headers)
 	
-	h:receivebody(headers, nreqt.sink, nreqt.step)
-	h:close()
-	
+	h:receivebody(headers, custom_sink)
 	push_event("DONE", 0)
+	
+	
+	if headers.connection and headers.connection == "keep-alive" then
+		lasthttp = h
+	else
+		h:close()
+		lasthttp = nil
+	end
 end)
 
 local command = cin:demand()
 while command ~= "QUIT" do
+	print("command", command)
 	local headers = cin:pop()
 	local a, b, c = pcall(request_http, command, headers)
 	

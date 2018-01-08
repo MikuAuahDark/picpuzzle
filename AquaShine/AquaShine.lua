@@ -22,6 +22,20 @@
 -- IN THE SOFTWARE.
 --]]---------------------------------------------------------------------------
 
+if not(pcall(require, "table.new")) then
+	function table.new()
+		return {}
+	end
+end
+
+if not(pcall(require, "table.clear")) then
+	function table.clear(a)
+		for n, v in pairs(a) do
+			a[n] = nil
+		end
+	end
+end
+
 local weak_table = {__mode = "v"}
 local AquaShine = {
 	CurrentEntryPoint = nil,
@@ -196,19 +210,32 @@ function AquaShine.LoadEntryPoint(name, arg)
 	if name:sub(1, 1) == ":" then
 		-- Predefined entry point
 		if AquaShine.Config.AllowEntryPointPreload then
-			scriptdata, title = assert(assert(AquaShine.PreloadedEntryPoint[name:sub(2)], "Entry point not found")(AquaShine))
+			scriptdata, title = assert(AquaShine.PreloadedEntryPoint[name:sub(2)], "Entry point not found")(AquaShine)
+			assert(scriptdata, "Script doesn't return entry point")
 		else
-			scriptdata, title = assert(assert(love.filesystem.load(
+			scriptdata, title = assert(love.filesystem.load(
 				assert(AquaShine.Config.Entries[name:sub(2)], "Entry point not found")[2]
-			))(AquaShine))
+			))(AquaShine)
+			assert(scriptdata, "Script doesn't return entry point")
 		end
 	else
-		scriptdata, title = assert(assert(love.filesystem.load(name))(AquaShine))
+		scriptdata, title = assert(love.filesystem.load(name))(AquaShine)
+		assert(scriptdata, "Script doesn't return entry point")
 	end
 	
 	scriptdata.Start(arg or {})
 	TemporaryEntryPoint = scriptdata
 	
+	if title then
+		love.window.setTitle(AquaShine.WindowName .. " - "..title)
+	else
+		love.window.setTitle(AquaShine.WindowName)
+	end
+end
+
+--! @brief Set window title
+--! @param title The new window title (or nil to reset)
+function AquaShine.SetWindowTitle(title)
 	if title then
 		love.window.setTitle(AquaShine.WindowName .. " - "..title)
 	else
@@ -326,7 +353,7 @@ end
 
 --! @brief Determines if runs under slow system (mobile devices)
 function AquaShine.IsSlowSystem()
-	return not(jit) or AquaShine.OperatingSystem == "Android" or AquaShine.OperatingSystem == "iOS"
+	return AquaShine.OperatingSystem == "Android" or AquaShine.OperatingSystem == "iOS"
 end
 
 --! @brief Disable screen sleep
@@ -461,7 +488,7 @@ local LoadedImage = setmetatable({}, {__mode = "v"})
 --! @returns Drawable object
 function AquaShine.LoadImageNoCache(path)
 	assert(path:sub(-4) == ".png", "Only PNG image is supported")
-	local x, y = pcall(love.graphics.newImage, path, ConstImageFlags)
+	local x, y = pcall(love.graphics.newImage, path)
 	AquaShine.Log("AquaShine", "LoadImageNoCache %s", path)
 	
 	if x then
@@ -552,6 +579,8 @@ end
 ------------------------------
 -- Other Internal Functions --
 ------------------------------
+local FileDroppedList = table.new(50, 0)
+
 function AquaShine.StepLoop()
 	AquaShine.ExitStatus = nil
 	
@@ -579,6 +608,7 @@ function AquaShine.StepLoop()
 		
 		love.handlers[name](a, b, c, d, e, f)
 	end
+	table.clear(FileDroppedList)
 	
 	-- Update dt, as we'll be passing it to update
 	local dt = love.timer.step()
@@ -612,9 +642,7 @@ function AquaShine.StepLoop()
 			end
 			love.graphics.setCanvas()
 		end
-		love.graphics.setShader(srgbshader)
 		love.graphics.draw(AquaShine.MainCanvas)
-		love.graphics.setShader()
 		love.graphics.present()
 	end
 end
@@ -648,41 +676,6 @@ function AquaShine.NewLoveCompat()
 	function love.timer.step()
 		step_time()
 		return love.timer.getDelta()
-	end
-	
-	-- love.filesystem.getInfo combines these:
-	-- * love.filesystem.exists
-	-- * love.filesystem.isDirectory
-	-- * love.filesystem.isFile
-	-- * love.filesystem.isSymlink
-	-- * love.filesystem.getSize
-	-- * love.filesystem.getLastModified
-	function love.filesystem.getInfo(dir, t)
-		if love.filesystem.exists(dir) then
-			t = t or {}
-			
-			-- Type
-			if love.filesystem.isFile(dir) then
-				t.type = "file"
-			elseif love.filesystem.isDirectory(dir) then
-				t.type = "directory"
-			elseif love.filesystem.isSymlink(dir) then
-				t.type = "symlink"
-			else
-				t.type = "other"
-			end
-			
-			if t.type == "directory" then
-				t.size = 0
-			else
-				t.size = love.filesystem.getSize(dir) or -1
-			end
-			
-			t.modtime = love.filesystem.getLastModified(dir) or -1
-			return t
-		end
-		
-		return nil
 	end
 	
 	-- 0..1 range for love.graphics.setColor
@@ -831,9 +824,26 @@ function AquaShine.NewLoveCompat()
 	love.data = {}
 	
 	-- love.math.decompress is deprecated, replaced by love.data.decompress
-	function love.data.decompress(fmt, data)
+	function love.data.decompress(data_or_string, fmt, data)
 		-- Notice the argument order
-		return love.math.decompress(data, fmt)
+		if data_or_string == "data" then
+			return love.filesystem.newFileData(love.math.decompress(data, fmt), "")
+		elseif data_or_string == "string" then
+			return love.math.decompress(data, fmt)
+		else
+			error("Invalid return type: expected 'data' or 'string'", 2)
+		end
+	end
+	
+	-- love.math.compress is deprecated, replaced by love.data.compress
+	function love.data.compress(data_or_string, fmt, data, level)
+		if data_or_string == "data" then
+			return love.filesystem.newFileData(love.math.compress(data, fmt, level), "")
+		elseif data_or_string == "string" then
+			return love.math.compress(data, fmt, level)
+		else
+			error("Invalid return type: expected 'data' or 'string'", 2)
+		end
 	end
 	
 	-- Shader:hasUniform
@@ -1030,16 +1040,56 @@ function love.resize(w, h)
 end
 
 -- When running low memory
-if jit then
-	love.lowmemory = jit.flush
-else
-	love.lowmemory = collectgarbage
+love.lowmemory = jit.flush
+
+-- love.filesystem always loaded, so put it outside of AquaShine.NewLoveCompat
+if not(AquaShine.NewLove) then
+	-- love.filesystem.getInfo combines these:
+	-- * love.filesystem.exists
+	-- * love.filesystem.isDirectory
+	-- * love.filesystem.isFile
+	-- * love.filesystem.isSymlink
+	-- * love.filesystem.getSize
+	-- * love.filesystem.getLastModified
+	function love.filesystem.getInfo(dir, t)
+		if love.filesystem.exists(dir) then
+			t = t or {}
+			
+			-- Type
+			if love.filesystem.isFile(dir) then
+				t.type = "file"
+			elseif love.filesystem.isDirectory(dir) then
+				t.type = "directory"
+			elseif love.filesystem.isSymlink(dir) then
+				t.type = "symlink"
+			else
+				t.type = "other"
+			end
+			
+			if t.type == "directory" then
+				t.size = 0
+			else
+				t.size = love.filesystem.getSize(dir)
+			end
+			
+			t.modtime = love.filesystem.getLastModified(dir)
+			return t
+		end
+		
+		return nil
+	end
 end
 
 -- Initialization
 function love.load(arg)
+	-- If we're running LOVE 0.10, add some functions
+	-- which present in LOVE 0.11
 	if not(AquaShine.NewLove) then
 		AquaShine.NewLoveCompat()
+	end
+
+	function love.handlers.filedropped(file)
+		FileDroppedList[#FileDroppedList + 1] = file
 	end
 	
 	-- Initialization
@@ -1047,9 +1097,6 @@ function love.load(arg)
 	AquaShine.OperatingSystem = love.system.getOS()
 	AquaShine.Class = love.filesystem.load("AquaShine/30log.lua")()
 	love.filesystem.setIdentity(love.filesystem.getIdentity(), true)
-	
-	-- Backward compatibility
-	package.loaded["30log"] = AquaShine.Class
 	
 	if AquaShine.GetCommandLineConfig("debug") then
 		function AquaShine.Log(part, msg, ...)
@@ -1069,10 +1116,6 @@ function love.load(arg)
 	AquaShine.RendererInfo = {love.graphics.getRendererInfo()}
 	AquaShine.LoadModule("AquaShine.InitExtensions")
 	love.resize(wx, wy)
-	
-	if AquaShine.OperatingSystem == "Android" then
-		jit[AquaShine.LoadConfig("JUST_IN_TIME", "off")]()
-	end
 	
 	if jit and AquaShine.GetCommandLineConfig("interpreter") then
 		jit.off()
