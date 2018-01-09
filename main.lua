@@ -1,6 +1,5 @@
 assert(love.filesystem.createDirectory("screenshots", "Failed to create save directory"))
 
--- Splash
 local lily = require("lily")
 local aqs = love._getAquaShineHandle()
 local isFused = love.filesystem.isFused()

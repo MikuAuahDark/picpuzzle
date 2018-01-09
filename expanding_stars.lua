@@ -9,6 +9,20 @@ local function rand3()
 	return math.random(), math.random(), math.random(), math.random()
 end
 
+function stars.pause()
+	stars.paused = true
+end
+
+function stars.disableStars()
+	shader:send("enableStars", false)
+	stars.paused = true
+end
+
+function stars.enableStars()
+	shader:send("enableStars", true)
+	stars.paused = false
+end
+
 function stars.load()
 	local noiseimg = love.image.newImageData(512, 512)
 	noiseimg:mapPixel(rand3)
@@ -34,6 +48,7 @@ function stars.load()
 	extern float iTime;
 	extern vec3 backgroundColor;
 	extern sampler2D noiseImage;
+	extern bool enableStars;
 	const vec3 starColor = vec3(1.0, 1.0, 1.0);
 	const vec4 fullWhite = vec4(1.0, 1.0, 1.0, 1.0);
 
@@ -99,7 +114,8 @@ function stars.load()
 		uv.x *= aspect;
 		
 		vec3 col = renderBackground(uv, aspect);
-		col += renderStars(uv, aspect);
+		if (enableStars)
+			col += renderStars(uv, aspect);
 		
 		fragColor = vec4(col.xyz, 1.0);
 	}
@@ -107,7 +123,7 @@ function stars.load()
 	vec4 effect(vec4 c, Image tex, vec2 tc, vec2 sc)
 	{
 		vec4 fc;
-		mainImage(fc, sc);
+		mainImage(fc, iResolution * tc);
 		return fc;
 	}
 	]]
@@ -115,20 +131,23 @@ function stars.load()
 	shader:send("noiseImage", noiseimg)
 	
 	stars.flux = flux.group()
+	return stars.enableStars()
 end
 
 function stars.update(deltaT)
-	elapsed_time = elapsed_time + deltaT
+	if not(stars.paused) then
+		elapsed_time = elapsed_time + deltaT
+	end
+	
 	stars.flux:update(deltaT)
 	shader:send("iTime", elapsed_time * 0.125)
 	shader:send("backgroundColor", stars.color)
 end
 
 function stars.draw()
-	love.graphics.push("all")
 	love.graphics.setShader(shader)
 	love.graphics.draw(temp_image)
-	love.graphics.pop()
+	love.graphics.setShader()
 end
 
 function stars.setColorTransition(r, g, b)
@@ -136,4 +155,7 @@ function stars.setColorTransition(r, g, b)
 end
 love.handlers.stars_setcolor = stars.setColorTransition
 
-return stars.load() or stars
+stars.load()
+if love._os == "Android" or love._os == "iOS" then stars.disableStars() end
+--stars.disableStars()
+return stars
