@@ -17,7 +17,7 @@
 --    misrepresented as being the original software.
 -- 3. This notice may not be removed or altered from any source distribution.
 
-local lily = {_VERSION = "2.0.3"}
+local lily = {_VERSION = "2.0.4"}
 local love = require("love")
 assert(love._version >= "0.10.0", "Lily require at least LOVE 0.10.0")
 
@@ -91,7 +91,6 @@ local function initThreads()
 	end
 	for i = 1, number_processor do
 		local a = lily.threads[i]
-		print(a.thread:getError())
 		a.id = a.channel_info:demand()
 		-- Wait until task_count count is added.
 		-- Somehow, using suply/demand doesn't work

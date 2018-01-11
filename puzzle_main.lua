@@ -49,12 +49,18 @@ function PuzzleMain.Start(arg)
 	local fd
 	if arg.lovepath then
 		lily.newImageData(arg.lovepath)
+			:onError(function()
+				print("Error loading image")
+			end)
 			:onComplete(PuzzleMain.MainStart)
 			:setUserData(arg)
 	else
 		local image = assert(io.open(arg[1], "rb"))
 		local fd = love.filesystem.newFileData(image:read("*a"), "_")
 		lily.newImageData(fd)
+			:onError(function()
+				print("Error loading image")
+			end)
 			:onComplete(PuzzleMain.MainStart)
 			:setUserData(arg)
 		image:close()
@@ -68,7 +74,7 @@ function PuzzleMain.MainStart(arg, image)
 	
 	-- Load image supplied by arg
 	PuzzleMain.ImageData = image
-	PuzzleMain.Image = love.graphics.newImage(image)
+	PuzzleMain.Image = love.graphics.newImage(image, {mipmaps = true})
 	PuzzleMain.ImageWH = {image:getDimensions()}
 	
 	-- Get puzzle size
@@ -85,6 +91,7 @@ function PuzzleMain.MainStart(arg, image)
 	
 	-- Create tons of Quads
 	PuzzleMain.Quads = {}
+	-- The actual position of specific index
 	PuzzleMain.ShouldBeInIndex = {}
 	PuzzleMain.SelectedIndex = -1
 	for i = 0, len - 1 do
@@ -196,10 +203,28 @@ end
 function PuzzleMain.ResetState()
 	local len = PuzzleMain.Size * PuzzleMain.Size
 	
+	-- Auto solve
+	for i = 0, len - 1 do
+		local a = PuzzleMain.ShouldBeInIndex[i]
+		
+		repeat
+			local b = PuzzleMain.ShouldBeInIndex[a]
+			PuzzleMain.ShouldBeInIndex[a], PuzzleMain.ShouldBeInIndex[b] =
+			PuzzleMain.ShouldBeInIndex[b], PuzzleMain.ShouldBeInIndex[a]
+			PuzzleMain.Quads[a], PuzzleMain.Quads[b] =
+			PuzzleMain.Quads[b], PuzzleMain.Quads[a]
+			a = PuzzleMain.ShouldBeInIndex[i]
+		until a == i
+	end
+	
+	math.randomseed(os.time())
+	
 	-- Randomize
 	for i = 0, len - 1 do
 		local rnd
-		repeat rnd = math.random(0, len - 1) until rnd ~= i
+		repeat
+			rnd = math.random(0, len - 1)
+		until rnd ~= i
 		
 		-- Swap
 		PuzzleMain.ShouldBeInIndex[i], PuzzleMain.ShouldBeInIndex[rnd] =
